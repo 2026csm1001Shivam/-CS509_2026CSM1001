@@ -1,0 +1,12 @@
+============================================
+ Test case         : assignment_01\tests\test_06.txt
+ Matrix size N     : 1024 x 1024
+ Block size (BS)   : 128
+--------------------------------------------
+ Result (checksum of C = A x B): 21759139504.000000
+ Correctness (simple == blocked): PASSED
+--------------------------------------------
+ Algorithm time (simple)  : 5602.604000 ms
+ Algorithm time (blocked) : 3599.048000 ms
+ Speedup (simple/blocked) : 1.56x
+============================================

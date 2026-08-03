@@ -1,0 +1,3 @@
+# Test case 03 - Matrix Multiplication (Simple vs Blocked)
+N 512
+BLOCK 32

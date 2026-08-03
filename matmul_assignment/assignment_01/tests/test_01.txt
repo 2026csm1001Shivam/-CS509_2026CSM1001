@@ -1,0 +1,4 @@
+# Test case 01 - Matrix Multiplication (Simple vs Blocked)
+# Exactly one test case per file: N and BLOCK size.
+N 128
+BLOCK 16
