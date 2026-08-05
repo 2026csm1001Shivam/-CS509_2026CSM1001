@@ -57,6 +57,64 @@ A clear error message is printed for a missing or invalid input file. The
 common wrapper (in `matmul_assignment/common_wrapper/`) lists this as
 Assignment 2 and can compile and run it.
 
+## How we executed the program
+
+We compiled and ran everything from the repository root on Windows 10 with
+MinGW g++ 4.8.3 (C++11, `-O2`):
+
+```sh
+# 1. Build the CSR driver
+make
+
+# 2. Run a single test case
+make run-one TEST=csr_10.txt
+
+# 3. Run all 7 CSR test cases
+make run-all
+```
+
+Equivalent direct driver calls (what the make targets execute under the hood):
+
+```sh
+driver/driver.exe tests/csr_10.txt
+driver/driver.exe --all
+```
+
+For every test the driver prints the report to the console and saves the same
+report to `outputs/output_<test>.txt` (e.g. `output_csr_10.txt`). The test
+files were generated once by `matmul_assignment/tools/gen_tests.py` (fixed
+seed, deterministic).
+
+## Program flow
+
+1. **Entry point** - `driver/driver.cpp:main()` reads the command line; usage
+   is `driver <input_file|--all>`.
+2. **Parsing** - `parse_graph_file()` reads the `V E` header, one line per
+   vertex (`u degree neighbor1 neighbor2 ...` for unweighted graphs, or
+   `u degree neighbor1 weight1 ...` for positive-weighted graphs), and the
+   optional `SOURCE s` line. The result is an `AdjacencyList` holding the
+   per-vertex `neighbors` and, for weighted graphs, `weights`.
+3. **CSR conversion (preprocessing)** - `build_csr()` (`csr.cpp:5`) first does
+   a prefix-sum over the degrees to build `row_ptr`, then copies each vertex's
+   neighbours into `col_idx` and, if weighted, the weights into `values`. This
+   step is timed separately and reported as "Preprocessing ... (not counted)".
+4. **Validation** - `csr_verify()` (`csr.cpp:35`) checks that the CSR arrays
+   reproduce the adjacency list exactly: sizes, `row_ptr` monotonicity, and
+   every `col_idx` / `values` entry in the same order.
+5. **Timed scan** - `timed_ms_avg()` times `csr_scan_checksum()` (`csr.cpp:70`),
+   which iterates over every edge through `row_ptr`/`col_idx` - the same
+   neighbour traversal every CSR-based graph algorithm performs. If one run is
+   faster than 5 ms the measurement is repeated and the average over R runs is
+   reported.
+6. **Reporting** - the driver prints the graph summary (V, stored entries,
+   weighted flag, source, min/max degree), `row_ptr`/`col_idx` (plus `values`
+   when weighted, for V <= 100), the validation result, the preprocessing and
+   scan times, and the scan checksum; the same report is saved to
+   `outputs/output_<test>.txt`.
+7. **`--all` mode** - lists every `csr_*.txt` in the tests directory and
+   repeats steps 2-6 for each file, returning a failure exit code if any
+   validation fails.
+
 ## Graph input format (assignment rules 3, 6, 7)
 
 Unweighted adjacency list (used by BFS/DFS):

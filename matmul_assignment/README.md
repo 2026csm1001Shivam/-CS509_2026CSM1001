@@ -75,6 +75,70 @@ common_wrapper/wrapper   (or: make wrapper && common_wrapper/wrapper)
 
 A clear error message is printed for a missing or invalid input file.
 
+## How we executed the program
+
+We compiled and ran everything from the repository root on Windows 10 with
+MinGW g++ 4.8.3 (C++11, `-O2`):
+
+```sh
+# 1. Build the GEMM driver + the interactive wrapper
+make
+
+# 2. Run a single test case
+make run-gemm TEST=gemm_test_01.txt
+
+# 3. Run all 9 GEMM test cases
+make run-all-gemm
+
+# 4. Interactive menu (compile / run one / run all, both assignments)
+common_wrapper/wrapper.exe
+```
+
+Equivalent direct driver calls (what `make run-gemm` / `make run-all-gemm`
+execute under the hood):
+
+```sh
+assignment_01/driver/driver.exe gemm assignment_01/tests/gemm_test_01.txt
+assignment_01/driver/driver.exe gemm --all
+```
+
+For every test the driver prints the report to the console and saves the same
+report to `assignment_01/outputs/output_<test>.txt` (e.g.
+`output_gemm_test_01.txt`). The test data was generated once with
+`python tools/gen_tests.py` (fixed seed, deterministic).
+
+## Program flow
+
+1. **Entry point** - `assignment_01/driver/driver.cpp:main()` reads the
+   command line; usage is `driver gemm <input_file|--all>`.
+2. **Input handling** - the driver selects the tests/output directories
+   (falling back to relative paths if not run from the repo root), checks that
+   the input file exists, then calls `parse_gemm_file()`, which reads the
+   `M K N` header, an optional `# BLOCK n` line (block size, default 32), and
+   the raw A and B values into a `GemmTest` struct.
+3. **Matrix construction** - the flat A values are loaded into an `M x K`
+   `Matrix` and the B values into a `K x N` `Matrix` (row-major container,
+   `matrix.cpp`).
+4. **Algorithm 1 (simple)** - `matmul_simple()` (`gemm.cpp:7`) computes
+   `C = A x B` with the textbook i-j-k triple loop. The timer starts right
+   before this call and stops right after it.
+5. **Algorithm 2 (blocked)** - `matmul_blocked()` (`gemm.cpp:24`) tiles the
+   loops into `bs x bs` blocks using i-k-j loop order so the inner j-loop reuses
+   the cached `A(i,k)` element, improving cache locality for large matrices.
+6. **Timing** - `timed_ms_avg()` (`driver.cpp:123`) runs each algorithm once;
+   if a single run is faster than 5 ms it repeats the measurement and reports
+   the average (the number of runs R is printed with every result).
+7. **Correctness check** - `matrices_equal()` compares the two C matrices with
+   tolerance 1e-6, and `matrix_checksum()` computes a checksum of the result.
+   `render_matrix()` prints the full matrix when it has at most 1024 elements,
+   otherwise an 8x8 sample plus the checksum.
+8. **Reporting** - the report (dimensions, result matrix, execution times,
+   average runs, correctness status, checksum, speedup) is printed to the
+   console and saved to `assignment_01/outputs/output_<test>.txt`.
+9. **`--all` mode** - `run_all()` lists every `gemm_test_*.txt` in the tests
+   directory and repeats steps 2-8 for each file, returning a failure exit code
+   if any test fails.
+
 ## Timing methodology (assignment rule 8)
 
 - The timer starts immediately before the algorithm call and stops immediately
