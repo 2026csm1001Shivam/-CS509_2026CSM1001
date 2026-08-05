@@ -1,0 +1,32 @@
+Algorithm: GEMM Simple
+Test file: matmul_assignment\assignment_01\tests\gemm_test_02.txt
+Dimensions: A = 8 x 8, B = 8 x 8, C = 8 x 8
+Result matrix:
+121 197 125 155 63 153 75 231 
+159 213 137 136 125 157 72 185 
+192 242 130 216 100 190 80 240 
+105 94 74 96 28 70 36 101 
+102 147 116 96 47 130 75 127 
+128 161 89 169 35 125 60 173 
+139 159 166 111 28 167 98 208 
+211 207 157 189 110 178 89 255 
+Execution time: 0.000 ms
+(average of 7142 run(s))
+
+Algorithm: GEMM Blocking
+Block size: 2
+Result matrix:
+121 197 125 155 63 153 75 231 
+159 213 137 136 125 157 72 185 
+192 242 130 216 100 190 80 240 
+105 94 74 96 28 70 36 101 
+102 147 116 96 47 130 75 127 
+128 161 89 169 35 125 60 173 
+139 159 166 111 28 167 98 208 
+211 207 157 189 110 178 89 255 
+Execution time: 0.001 ms
+(average of 4545 run(s))
+
+Correctness (simple == blocked): PASSED
+Result checksum: 8550.000
+Speedup (simple/blocked): 0.47x

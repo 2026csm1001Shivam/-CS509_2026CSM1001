@@ -1,32 +1,3 @@
-/*
- * ============================================================
- *  Assignment 01 - Matrix Multiplication: Simple vs Blocked
- *  Dedicated driver program
- *  Course: CS509 - Lab Work, First-Year M.Tech CSE (2026)
- * ============================================================
- *
- *  The driver is separate from the core algorithm library
- *  (assignment_01/src/matmul.cpp). It:
- *    - reads ONE test case from a test file (N and BLOCK size),
- *    - prepares the input matrices (reproducible random fill),
- *    - times ONLY the algorithm calls (simple and blocked),
- *    - verifies that both versions produce the same result,
- *    - prints the computed result and the algorithm execution
- *      time (explicitly in milliseconds, ms).
- *
- *  Timing rule: input reading, parsing, matrix generation,
- *  verification and printing are all OUTSIDE the timed region.
- *  The timer starts immediately before each algorithm call and
- *  stops immediately after it finishes.
- *
- *  Usage:
- *    driver <test_file>    Run a single test case
- *    driver --all          Run every test_XX.txt in the tests dir
- *
- *  Each test file contains exactly ONE test case.
- * ============================================================
- */
-
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -37,7 +8,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <cctype>
-#include "matmul.h"
+#include "matrix.h"
+#include "gemm.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -49,15 +21,12 @@
 #define PATH_SEP "/"
 #endif
 
-/* Default locations, relative to the repository root
- * (the driver is normally launched from the repo root via
- * `make run-one TEST=...` or `make run-all`). */
-static const char *DEFAULT_TESTS_DIR = "assignment_01" PATH_SEP "tests";
-static const char *DEFAULT_OUTS_DIR  = "assignment_01" PATH_SEP "outputs";
-static const char *FALLBACK_TESTS_DIR = "tests";
-static const char *FALLBACK_OUTS_DIR  = "outputs";
+static const char *DEFAULT_TESTS_DIR = "matmul_assignment" PATH_SEP "assignment_01" PATH_SEP "tests";
+static const char *DEFAULT_OUTS_DIR  = "matmul_assignment" PATH_SEP "assignment_01" PATH_SEP "outputs";
+static const char *FALLBACK_TESTS_DIR = "assignment_01" PATH_SEP "tests";
+static const char *FALLBACK_OUTS_DIR  = "assignment_01" PATH_SEP "outputs";
 
-/* ------------------- small helpers -------------------------- */
+static const int PRINT_FULL_LIMIT = 1024;  
 
 static std::string to_lower(std::string s) {
     for (std::size_t i = 0; i < s.size(); ++i) s[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
@@ -95,12 +64,21 @@ static void ensure_output_dir(const std::string &dir) {
 #endif
 }
 
-/* List all files named test_*.txt in dir, sorted by name. */
-static std::vector<std::string> list_test_files(const std::string &dir) {
+static std::string strip_ext(const std::string &name) {
+    std::size_t dot = name.find_last_of('.');
+    return (dot == std::string::npos) ? name : name.substr(0, dot);
+}
+
+static std::string base_name(const std::string &path) {
+    std::size_t slash = path.find_last_of("/\\");
+    return strip_ext(path.substr(slash == std::string::npos ? 0 : slash + 1));
+}
+
+static std::vector<std::string> list_test_files(const std::string &dir, const std::string &prefix) {
     std::vector<std::string> files;
 #ifdef _WIN32
     WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA((dir + PATH_SEP "test_*.txt").c_str(), &fd);
+    HANDLE h = FindFirstFileA((dir + PATH_SEP + prefix + "*.txt").c_str(), &fd);
     if (h != INVALID_HANDLE_VALUE) {
         do { files.push_back(fd.cFileName); } while (FindNextFileA(h, &fd));
         FindClose(h);
@@ -111,7 +89,7 @@ static std::vector<std::string> list_test_files(const std::string &dir) {
         struct dirent *e;
         while ((e = readdir(d)) != NULL) {
             std::string name = e->d_name;
-            if (name.compare(0, 5, "test_") == 0 &&
+            if (name.compare(0, prefix.size(), prefix) == 0 &&
                 name.size() > 4 && name.substr(name.size() - 4) == ".txt")
                 files.push_back(name);
         }
@@ -122,100 +100,179 @@ static std::vector<std::string> list_test_files(const std::string &dir) {
     return files;
 }
 
-/* Parse exactly one test case: lines of the form "KEY value",
- * case-insensitive keys N and BLOCK. '#' starts a comment. */
-static bool parse_test_file(const std::string &path, int &n, int &bs) {
+static int parse_int(const std::string &s, int &out) {
+    if (s.empty()) return 1;
+    std::istringstream ss(s);
+    ss >> out;
+    return ss.fail() ? 1 : 0;
+}
+
+static double now_ms() {
+#ifdef _WIN32
+    static LARGE_INTEGER freq = {0, 0};
+    if (freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER t;
+    QueryPerformanceCounter(&t);
+    return static_cast<double>(t.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+#else
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now().time_since_epoch()).count();
+#endif
+}
+
+template <typename F>
+static double timed_ms_avg(F f, int &runs) {
+    double t0 = now_ms();
+    f();
+    double t1 = now_ms();
+    double single = t1 - t0;
+
+    int r = 1;
+    if (single < 5.0) {
+        if (single > 0.0) {
+            r = static_cast<int>(5.0 / single);
+        } else {
+            r = 10000;  
+        }
+        if (r < 1) r = 1;
+        if (r > 100000) r = 100000;
+    }
+
+    double a0 = now_ms();
+    for (int i = 0; i < r; ++i) f();
+    double a1 = now_ms();
+
+    runs = r;
+    return (a1 - a0) / r;
+}
+
+static void render_matrix(const Matrix &M, std::ostringstream &out, bool full) {
+    std::ios::fmtflags saved = out.flags();
+    std::streamsize prec = out.precision();
+    out.unsetf(std::ios::floatfield);
+    out.precision(6);
+    if (full) {
+        for (int i = 0; i < M.rows(); ++i) {
+            for (int j = 0; j < M.cols(); ++j) out << M.at(i, j) << " ";
+            out << "\n";
+        }
+    } else {
+        out << "(large matrix; first 8 rows and 8 columns shown)\n";
+        for (int i = 0; i < 8 && i < M.rows(); ++i) {
+            for (int j = 0; j < 8 && j < M.cols(); ++j) out << M.at(i, j) << " ";
+            out << "...\n";
+        }
+        out << "Result checksum: " << matrix_checksum(M) << "\n";
+    }
+    out.flags(saved);
+    out.precision(prec);
+}
+
+struct GemmTest {
+    int M = 0, K = 0, N = 0, bs = 32;
+    std::vector<double> A, B;  
+};
+
+static bool parse_gemm_file(const std::string &path, GemmTest &t) {
     std::ifstream in(path.c_str());
     if (!in) return false;
 
-    n = bs = -1;
+    t = GemmTest();
     std::string line;
+    bool header = false;
+    std::vector<double> raw;
+
     while (std::getline(in, line)) {
         line = trim(line);
-        if (line.empty() || line[0] == '#') continue;
+        if (line.empty()) continue;
+
+        if (line[0] == '#') {
+            std::istringstream ss(line);
+            std::string hash, key;
+            ss >> hash >> key;
+            if (key == "BLOCK" || key == "BLOCK_SIZE" || key == "BS") {
+                std::string val;
+                ss >> val;
+                int v = 0;
+                if (parse_int(val, v) == 0 && v > 0) t.bs = v;
+            }
+            continue;
+        }
+
+        if (!header) {
+            std::istringstream ss(line);
+            if (!(ss >> t.M >> t.K >> t.N) || t.M <= 0 || t.K <= 0 || t.N <= 0) return false;
+            header = true;
+            continue;
+        }
 
         std::istringstream ss(line);
-        std::string key, value;
-        ss >> key >> value;
-        if (key.empty() || value.empty()) continue;
-
-        key = to_lower(key);
-        if (key == "n")       n  = std::atoi(value.c_str());
-        else if (key == "block" || key == "block_size" || key == "bs")
-            bs = std::atoi(value.c_str());
+        double v;
+        while (ss >> v) raw.push_back(v);
     }
-    return n > 0 && bs > 0;
+
+    const std::size_t need_a = static_cast<std::size_t>(t.M) * t.K;
+    const std::size_t need_b = static_cast<std::size_t>(t.K) * t.N;
+    if (!header || raw.size() < need_a + need_b) return false;
+
+    t.A.assign(raw.begin(), raw.begin() + static_cast<std::ptrdiff_t>(need_a));
+    t.B.assign(raw.begin() + static_cast<std::ptrdiff_t>(need_a),
+               raw.begin() + static_cast<std::ptrdiff_t>(need_a + need_b));
+    return true;
 }
 
-static std::string strip_ext(const std::string &name) {
-    std::size_t dot = name.find_last_of('.');
-    return (dot == std::string::npos) ? name : name.substr(0, dot);
-}
-
-/* ------------------- run a single case ---------------------- */
-
-static int run_case(const std::string &test_path, const std::string &out_dir) {
-    int n = 0, bs = 0;
-
-    /* --- Input reading & parsing (OUTSIDE timed region) --- */
-    if (!parse_test_file(test_path, n, bs)) {
-        std::cerr << "Error: cannot parse test file '" << test_path
-                  << "' (expected keys: N and BLOCK, one test case per file)\n";
+static int run_gemm_case(const std::string &test_path, const std::string &out_dir) {
+    GemmTest t;
+    if (!parse_gemm_file(test_path, t)) {
+        std::cerr << "Error: cannot parse GEMM test file '" << test_path
+                  << "' (expected: first line 'M K N', then M rows of A, then K rows of B)\n";
         return EXIT_FAILURE;
     }
 
-    /* --- Input preparation (OUTSIDE timed region) ---------- */
-    Matrix A(n), B(n), C1(n), C2(n);
-    A.fill_random(42);  /* reproducible input matrices          */
-    B.fill_random(7);
+    Matrix A(t.M, t.K), B(t.K, t.N);
+    for (int i = 0; i < t.M; ++i)
+        for (int k = 0; k < t.K; ++k)
+            A.at(i, k) = t.A[static_cast<std::size_t>(i) * t.K + k];
+    for (int k = 0; k < t.K; ++k)
+        for (int j = 0; j < t.N; ++j)
+            B.at(k, j) = t.B[static_cast<std::size_t>(k) * t.N + j];
 
-    /* --- 1) SIMPLE version: timer around the algorithm call -- */
-    auto t0 = std::chrono::steady_clock::now();
-    matmul_simple(A, B, C1);
-    auto t1 = std::chrono::steady_clock::now();
-    double ms_simple = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    Matrix C1(t.M, t.N), C2(t.M, t.N);
 
-    /* --- 2) BLOCKED version: timer around the algorithm call - */
-    auto t2 = std::chrono::steady_clock::now();
-    matmul_blocked(A, B, C2, bs);
-    auto t3 = std::chrono::steady_clock::now();
-    double ms_blocked = std::chrono::duration<double, std::milli>(t3 - t2).count();
+    int runs_simple = 1, runs_blocked = 1;
+    double ms_simple = timed_ms_avg([&]() { matmul_simple(A, B, C1); }, runs_simple);
+    double ms_blocked = timed_ms_avg([&]() { matmul_blocked(A, B, C2, t.bs); }, runs_blocked);
 
-    /* --- Verification & result extraction (OUTSIDE timed) --- */
     bool ok = matrices_equal(C1, C2, 1e-6);
     double checksum = matrix_checksum(C1);
-
-    std::size_t slash = test_path.find_last_of("/\\");
-    std::string base = strip_ext(test_path.substr(slash == std::string::npos ? 0 : slash + 1));
+    bool print_full = static_cast<std::size_t>(t.M) * t.N <= PRINT_FULL_LIMIT;
+    std::string base = base_name(test_path);
 
     std::ostringstream out;
-    out << std::fixed << std::setprecision(6);
-    out << "============================================\n";
-    out << " Test case         : " << test_path << "\n";
-    out << " Matrix size N     : " << n << " x " << n << "\n";
-    out << " Block size (BS)   : " << bs << "\n";
-    out << "--------------------------------------------\n";
-    out << " Result (checksum of C = A x B): " << checksum << "\n";
-    out << " Correctness (simple == blocked): " << (ok ? "PASSED" : "FAILED") << "\n";
-    out << "--------------------------------------------\n";
-    out << " Algorithm time (simple)  : " << ms_simple  << " ms\n";
-    out << " Algorithm time (blocked) : " << ms_blocked << " ms\n";
-    out << " Speedup (simple/blocked) : " << std::setprecision(2)
+    out << std::fixed << std::setprecision(3);
+    out << "Algorithm: GEMM Simple\n";
+    out << "Test file: " << test_path << "\n";
+    out << "Dimensions: A = " << t.M << " x " << t.K << ", B = " << t.K << " x " << t.N
+        << ", C = " << t.M << " x " << t.N << "\n";
+    out << "Result matrix:\n";
+    render_matrix(C1, out, print_full);
+    out << "Execution time: " << ms_simple << " ms\n";
+    out << "(average of " << runs_simple << " run(s))\n\n";
+
+    out << "Algorithm: GEMM Blocking\n";
+    out << "Block size: " << t.bs << "\n";
+    out << "Result matrix:\n";
+    render_matrix(C2, out, print_full);
+    out << "Execution time: " << ms_blocked << " ms\n";
+    out << "(average of " << runs_blocked << " run(s))\n\n";
+
+    out << "Correctness (simple == blocked): " << (ok ? "PASSED" : "FAILED") << "\n";
+    out << "Result checksum: " << checksum << "\n";
+    out << "Speedup (simple/blocked): " << std::setprecision(2)
         << (ms_blocked > 0 ? (ms_simple / ms_blocked) : 0.0) << "x\n";
-    out << "============================================\n";
 
     std::cout << out.str();
 
-    /* Optional: print matrices for small N so results can be
-     * verified by hand (still outside the timed region). */
-    if (n <= 8) {
-        std::cout << "Matrix A:\n"; A.print();
-        std::cout << "\nMatrix B:\n"; B.print();
-        std::cout << "\nResult C (simple):\n"; C1.print();
-        std::cout << "\nResult C (blocked):\n"; C2.print();
-    }
-
-    /* Save output file for the assignment's outputs/ folder */
     ensure_output_dir(out_dir);
     std::string out_path = out_dir + PATH_SEP + "output_" + base + ".txt";
     std::ofstream ofs(out_path.c_str());
@@ -225,45 +282,60 @@ static int run_case(const std::string &test_path, const std::string &out_dir) {
     return ok ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-/* ---------------------------- main --------------------------- */
+static void print_usage(const char *prog) {
+    std::cerr << "Usage: " << prog << " gemm <input_file|--all>\n"
+              << "  <input_file>  path to a single GEMM test file (gemm_test_*.txt)\n"
+              << "  --all         run every matching test file in the tests dir\n"
+              << "Examples:\n"
+              << "  " << prog << " gemm tests/gemm_test_01.txt\n"
+              << "  " << prog << " gemm --all\n";
+}
 
-int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <test_file>\n"
-                  << "       " << argv[0] << " --all\n"
-                  << "  <test_file> : path to a single test file (e.g. tests/test_01.txt)\n"
-                  << "  --all       : run every test_XX.txt in the assignment's tests dir\n";
+static int run_all(const std::string &tests_dir, const std::string &outs_dir) {
+    const std::string prefix = "gemm_test_";
+    std::vector<std::string> files = list_test_files(tests_dir, prefix);
+    if (files.empty()) {
+        std::cerr << "Error: no '" << prefix << "*.txt' test files found in '" << tests_dir << "'\n";
         return EXIT_FAILURE;
     }
 
+    std::cout << "Running all '" << prefix << "*.txt' files found in '" << tests_dir << "':\n\n";
+    int overall = EXIT_SUCCESS;
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        std::cout << "######## " << (i + 1) << "/" << files.size() << " : " << files[i] << " ########\n";
+        if (run_gemm_case(tests_dir + PATH_SEP + files[i], outs_dir) != EXIT_SUCCESS)
+            overall = EXIT_FAILURE;
+        std::cout << "\n";
+    }
+    std::cout << "All test files finished. "
+              << (overall == EXIT_SUCCESS ? "Everything passed." : "Some tests FAILED.") << "\n";
+    return overall;
+}
+
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        print_usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    std::string algorithm = to_lower(argv[1]);
+    if (algorithm != "gemm") {
+        print_usage(argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    std::string arg = argv[2];
     std::string tests_dir = dir_exists(DEFAULT_TESTS_DIR) ? DEFAULT_TESTS_DIR : FALLBACK_TESTS_DIR;
     std::string outs_dir  = dir_exists(DEFAULT_OUTS_DIR)  ? DEFAULT_OUTS_DIR  : FALLBACK_OUTS_DIR;
 
-    std::string arg = argv[1];
-
     if (arg == "--all") {
-        std::vector<std::string> files = list_test_files(tests_dir);
-        if (files.empty()) {
-            std::cerr << "Error: no test files found in '" << tests_dir << "'\n";
-            return EXIT_FAILURE;
-        }
-        std::cout << "Running all test files found in '" << tests_dir << "':\n\n";
-        int overall = EXIT_SUCCESS;
-        for (std::size_t i = 0; i < files.size(); ++i) {
-            std::cout << "######## " << (i + 1) << "/" << files.size()
-                      << " : " << files[i] << " ########\n";
-            if (run_case(tests_dir + PATH_SEP + files[i], outs_dir) != EXIT_SUCCESS)
-                overall = EXIT_FAILURE;
-            std::cout << "\n";
-        }
-        std::cout << "All test files finished. "
-                  << (overall == EXIT_SUCCESS ? "Everything passed." : "Some tests FAILED.") << "\n";
-        return overall;
+        return run_all(tests_dir, outs_dir);
     }
 
     if (!file_exists(arg)) {
-        std::cerr << "Error: test file not found: '" << arg << "'\n";
+        std::cerr << "Error: input file not found: '" << arg << "'\n";
         return EXIT_FAILURE;
     }
-    return run_case(arg, outs_dir);
+
+    return run_gemm_case(arg, outs_dir);
 }

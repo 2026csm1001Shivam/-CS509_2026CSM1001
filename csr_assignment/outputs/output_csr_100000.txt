@@ -1,0 +1,9 @@
+Algorithm: CSR
+Test file: csr_assignment\tests\csr_100000.txt
+Graph: V=100000 stored entries=499626 weighted=no source=0
+Degree: min=1 max=15
+CSR validation (adj list == CSR): PASSED
+Preprocessing (adj-list -> CSR) time: 2.847 ms (not counted)
+Execution time (CSR scan): 0.890 ms
+(average of 4 run(s))
+Scan checksum: 24976630616.000

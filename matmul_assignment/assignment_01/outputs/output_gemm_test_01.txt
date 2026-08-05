@@ -1,0 +1,20 @@
+Algorithm: GEMM Simple
+Test file: matmul_assignment\assignment_01\tests\gemm_test_01.txt
+Dimensions: A = 2 x 3, B = 3 x 2, C = 2 x 2
+Result matrix:
+58 64 
+139 154 
+Execution time: 0.000 ms
+(average of 16666 run(s))
+
+Algorithm: GEMM Blocking
+Block size: 1
+Result matrix:
+58 64 
+139 154 
+Execution time: 0.000 ms
+(average of 25001 run(s))
+
+Correctness (simple == blocked): PASSED
+Result checksum: 415.000
+Speedup (simple/blocked): 0.27x
