@@ -1,4 +1,4 @@
-# CS509 Assignment 1 - CSR Graph (adjacency list -> CSR)
+# CS509 Assignment 1 — CSR Graph (adjacency list -> CSR)
 
 Part of the individual task for **Assignment 1** (CS509). This folder mirrors
 the `matmul_assignment/` layout and contains the CSR graph implementation as a
@@ -13,39 +13,25 @@ separate, self-contained assignment folder.
   iteration every CSR-based graph algorithm performs). Per the assignment
   timing rule, the adjacency-list-to-CSR conversion is preprocessing and its
   time is **not** included in the reported algorithm time.
-- The BFS / DFS / SSSP buddy tasks build on this file and reuse the
-  adjacency-list test files in `tests/`.
 
-## Repository layout
+Author: 2026CSM1001 (individual task; the GEMM implementation,
+`../matmul_assignment`, is the other half of this assignment and is covered by
+its own README; BFS / DFS / SSSP are the buddy-task algorithms that build on
+this file and are not part of this submission).
 
-```
-csr_assignment/
-├── Makefile                  # build / run targets
-├── src/
-│   ├── csr.h                 # AdjacencyList, CSRGraph, build_csr, csr_verify, csr_scan_checksum
-│   └── csr.cpp
-├── driver/
-│   ├── driver.cpp            # parses adjacency-list file, builds CSR, times only the scan
-│   └── driver.exe
-├── tests/                    # one test case per .txt file
-│   ├── csr_10.txt, csr_100.txt, csr_10000.txt, csr_50000.txt, csr_100000.txt
-│   └── csr_weighted_10.txt, csr_weighted_100.txt
-└── outputs/                  # saved outputs (output_<test>.txt)
-```
-
-## Building and running
+## Build & run
 
 Requires `g++` with C++11 support.
 
-```sh
-make
-make run-one TEST=csr_10.txt
-make run-all
+```
+mingw32-make                     # or: make  -> builds driver.exe
+mingw32-make run-one TEST=csr_10.txt
+mingw32-make run-all             # all 7 CSR test cases
 ```
 
 or directly:
 
-```sh
+```
 g++ -O2 -Wall -Wextra -std=c++11 -I src src/csr.cpp driver/driver.cpp -o driver/driver
 
 # usage: driver <input_file|--all>
@@ -54,66 +40,19 @@ driver --all
 ```
 
 A clear error message is printed for a missing or invalid input file. The
-common wrapper (in `matmul_assignment/common_wrapper/`) lists this as
-Assignment 2 and can compile and run it.
+common wrapper (in `../matmul_assignment/common_wrapper/`) lists this folder
+as Assignment 2 and can compile and run it.
 
-## How we executed the program
+## Files
 
-We compiled and ran everything from the repository root on Windows 10 with
-MinGW g++ 4.8.3 (C++11, `-O2`):
-
-```sh
-# 1. Build the CSR driver
-make
-
-# 2. Run a single test case
-make run-one TEST=csr_10.txt
-
-# 3. Run all 7 CSR test cases
-make run-all
-```
-
-Equivalent direct driver calls (what the make targets execute under the hood):
-
-```sh
-driver/driver.exe tests/csr_10.txt
-driver/driver.exe --all
-```
-
-For every test the driver prints the report to the console and saves the same
-report to `outputs/output_<test>.txt` (e.g. `output_csr_10.txt`). The test
-files were generated once by `matmul_assignment/tools/gen_tests.py` (fixed
-seed, deterministic).
-
-## Program flow
-
-1. **Entry point** - `driver/driver.cpp:main()` reads the command line; usage
-   is `driver <input_file|--all>`.
-2. **Parsing** - `parse_graph_file()` reads the `V E` header, one line per
-   vertex (`u degree neighbor1 neighbor2 ...` for unweighted graphs, or
-   `u degree neighbor1 weight1 ...` for positive-weighted graphs), and the
-   optional `SOURCE s` line. The result is an `AdjacencyList` holding the
-   per-vertex `neighbors` and, for weighted graphs, `weights`.
-3. **CSR conversion (preprocessing)** - `build_csr()` (`csr.cpp:5`) first does
-   a prefix-sum over the degrees to build `row_ptr`, then copies each vertex's
-   neighbours into `col_idx` and, if weighted, the weights into `values`. This
-   step is timed separately and reported as "Preprocessing ... (not counted)".
-4. **Validation** - `csr_verify()` (`csr.cpp:35`) checks that the CSR arrays
-   reproduce the adjacency list exactly: sizes, `row_ptr` monotonicity, and
-   every `col_idx` / `values` entry in the same order.
-5. **Timed scan** - `timed_ms_avg()` times `csr_scan_checksum()` (`csr.cpp:70`),
-   which iterates over every edge through `row_ptr`/`col_idx` - the same
-   neighbour traversal every CSR-based graph algorithm performs. If one run is
-   faster than 5 ms the measurement is repeated and the average over R runs is
-   reported.
-6. **Reporting** - the driver prints the graph summary (V, stored entries,
-   weighted flag, source, min/max degree), `row_ptr`/`col_idx` (plus `values`
-   when weighted, for V <= 100), the validation result, the preprocessing and
-   scan times, and the scan checksum; the same report is saved to
-   `outputs/output_<test>.txt`.
-7. **`--all` mode** - lists every `csr_*.txt` in the tests directory and
-   repeats steps 2-6 for each file, returning a failure exit code if any
-   validation fails.
+| File | Role |
+|---|---|
+| `Makefile` | Build / run targets |
+| `src/csr.h`, `src/csr.cpp` | `AdjacencyList`, `CSRGraph`, `build_csr`, `csr_verify`, `csr_scan_checksum` |
+| `driver/driver.cpp` | Parses adjacency-list file, builds CSR, times only the scan |
+| `tests/` | `csr_10.txt` .. `csr_100000.txt` (unweighted), `csr_weighted_10/100.txt` |
+| `outputs/` | Saved outputs (`output_<test>.txt`) |
+| `README.md` | This file, with the required result tables |
 
 ## Graph input format (assignment rules 3, 6, 7)
 
@@ -143,6 +82,20 @@ SOURCE s
 - A vertex with no neighbours is written as `u 0`.
 - For an undirected graph each edge appears in the lists of both endpoints.
 
+## Algorithms
+
+- **CSR conversion** (`build_csr()`, `csr.cpp`): prefix-sum over the degrees
+  to build `row_ptr`, then copy each vertex's neighbours into `col_idx` and,
+  if weighted, the weights into `values`. Timed and reported separately as
+  "Preprocessing ... (not counted)".
+- **Validation** (`csr_verify()`, `csr.cpp`): rebuilds the adjacency list
+  from the CSR arrays and checks it matches the input exactly — sizes,
+  `row_ptr` monotonicity, and every `col_idx` / `values` entry in the same
+  order.
+- **Timed scan** (`csr_scan_checksum()`, `csr.cpp`): one full iteration over
+  every edge through `row_ptr`/`col_idx` — the same neighbour traversal every
+  CSR-based graph algorithm performs.
+
 ## Timing methodology (assignment rule 8)
 
 - The timer starts immediately before the algorithm call and stops immediately
@@ -154,9 +107,9 @@ SOURCE s
   reported; the number of runs is printed with every measurement (R = max(1,
   min(100000, floor(5 ms / single-run time)))).
 - Unit: milliseconds (ms); timer is `QueryPerformanceCounter` on Windows.
-- Hardware used for the numbers below: Windows 10, g++ 4.8.3 (MinGW), -O2.
+- Environment: Windows 10, MinGW g++ 4.8.3, `-std=c++11 -O2`.
 
-## Results (graph result table, assignment 9.2)
+## 9.2 CSR results table (graph result table, assignment 9.2)
 
 | Algorithm | Test File | Vertices | Edges | Input Type | Source | Expected Output | Actual Output | Time | Status |
 |---|---|---|---|---|---|---|---|---|---|
@@ -174,5 +127,38 @@ csr_10: 0.002 ms, csr_100: 0.008 ms, csr_10000: 0.254 ms, csr_50000:
 
 All 5 required graph sizes (10, 100, 10,000, 50,000, 100,000 vertices) are
 covered. The test files are generated deterministically by
-`matmul_assignment/tools/gen_tests.py` (fixed seed), so every run is
+`../matmul_assignment/tools/gen_tests.py` (fixed seed), so every run is
 reproducible.
+
+## Driver behaviour — summary
+
+- Terminal args: `driver <input_file|--all>`; usage error otherwise.
+- `--all` mode lists every `csr_*.txt` in the tests directory, runs each, and
+  returns a failure exit code if any validation fails.
+- For every test the driver prints the report (graph summary, `row_ptr` /
+  `col_idx` / `values` for V <= 100, validation result, preprocessing and scan
+  times, scan checksum) to the console and saves the same report to
+  `outputs/output_<test>.txt`.
+- Missing or invalid input file -> clear `Error:` message and non-zero exit.
+
+## Deviations / notes vs the spec text
+
+1. **CSR helper.** The spec calls for the CSR-conversion function as part of
+   the CSR-based graph algorithms; it is implemented here in `csr.cpp`
+   (`build_csr`) plus the verification helper `csr_verify`, so correctness
+   is checked automatically on every run.
+2. **Preprocessing timing.** The adjacency-list-to-CSR conversion time is
+   printed separately ("not counted" in the algorithm time), per assignment
+   rule 8.
+3. **Weighted input.** Positive-weighted adjacency lists (used by SSSP) are
+   covered by the two `csr_weighted_*.txt` tests, which also produce `values`.
+
+## Regenerating test data
+
+The committed `.txt` files (for both assignments) were produced by
+`../matmul_assignment/tools/gen_tests.py` (fixed-seed deterministic
+generator):
+
+```
+python ../matmul_assignment/tools/gen_tests.py
+```
