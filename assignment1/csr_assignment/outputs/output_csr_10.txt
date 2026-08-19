@@ -1,5 +1,5 @@
 Algorithm: CSR
-Test file: csr_assignment\tests\csr_10.txt
+Test file: C:\iit_ropar_doc\CS509_2026CSM1001\allAssignments\assignment1\csr_assignment\tests\csr_10.txt
 Graph: V=10 stored entries=46 weighted=no source=0
 Degree: min=2 max=6
 CSR validation (adj list == CSR): PASSED
@@ -7,5 +7,5 @@ row_ptr: 0 3 8 13 17 22 27 33 35 40 46
 col_idx: 1 7 9 0 3 4 5 9 3 5 6 8 9 1 2 6 8 1 5 6 8 9 1 2 4 6 9 2 3 4 5 8 9 0 8 2 3 4 6 7 0 1 2 4 5 6
 Preprocessing (adj-list -> CSR) time: 0.002 ms (not counted)
 Execution time (CSR scan): 0.000 ms
-(average of 50003 run(s))
+(average of 24993 run(s))
 Scan checksum: 216.000
